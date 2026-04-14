@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>誤差偵探：黃金貓之謎</title>
+    <!-- 載入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 載入 React -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- 載入 Babel (用於在瀏覽器編譯 JSX) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        /* 避免 iOS Safari 彈出鍵盤時畫面縮放 */
+        input[type="text"], input[type="number"], textarea {
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body class="bg-slate-200 m-0 p-0">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // --- SVG 圖示元件 ---
+        const Send = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>;
+        const Mic = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" x1="12" y1="19" y2="22"></line></svg>;
+        const MicOff = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="2" y1="2" x2="22" y2="22"></line><path d="M18.89 13.23A7.12 7.12 0 0 0 19 10v-2"></path><path d="M5 10v2a7 7 0 0 0 12 5"></path><path d="M15 9.34V5a3 3 0 0 0-5.68-1.33"></path><path d="M9 9v3a3 3 0 0 0 5.12 2.12"></path><line x1="12" y1="19" x2="12" y2="22"></line></svg>;
+        const AlertCircle = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>;
+        const CheckCircle = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>;
+        const InfoIcon = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>;
+        const ChevronRight = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>;
+        const Save = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>;
+
+        // --- 應用程式邏輯 ---
+        
+        // 你提供的 API Key
+        const apiKey = "AIzaSyAn-78UCwG_wTeVhzeCF8RtInEw0fchfLU"; 
+
+        // 老師設定的 Google Apps Script Web App URL
+        const GOOGLE_SHEET_URL = "https://script.google.com/macros/s/AKfycbwvswfA7mWQbwQljx6vvlpwu46hg7smw4vogo1Vr3aEqpoDDVugLTBdFiBWb_Dac3XA_w/exec"; 
+
+        const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+        async function fetchWithRetry(url, options, maxRetries = 3) {
+          let retries = 0;
+          while (retries < maxRetries) {
+            try {
+              const response = await fetch(url, options);
+              const data = await response.json();
+              if (!response.ok) {
+                 throw new Error(data.error?.message || `HTTP error! status: ${response.status}`);
+              }
+              return data;
+            } catch (error) {
+              retries++;
+              if (retries >= maxRetries) throw error;
+              await delay(1000);
+            }
+          }
+        }
+
+        // AI 系統提示詞
+        const SYSTEM_PROMPT = `
+        你現在扮演一位極度有錢但脾氣古怪、對數字非常執著的首富金先生。
+        情境：你花一百萬訂製純金招財貓，要求高度絕對剛好 12 cm。工匠用最小刻度 1 cm 的尺量出 12 cm，但說一定有誤差。你拒付尾款！
+        玩家（學生）是你高薪聘請的數學顧問，要說服你。
+
+        【說服進度設定】你必須嚴格依照以下階段回應，絕對不能提早讓步，這是一場漸進式的辯論：
+
+        【階段一：質疑原理】
+        當玩家只提到一定有誤差、世界上沒有絕對等空泛理由時，你不能接受。
+        你要反駁：廢話！我是首富，買不到絕對精準？你要告訴我，這把最小刻度 1 cm 的尺，它的「最大絕對誤差」到底是多少？背後的數學公式是什麼？我才信你！
+
+        【階段二：要求公式與加碼測驗】
+        當玩家成功說出公式包含「一半」或「1/2 乘以最小刻度」，並算出這把 1cm 尺的誤差是 0.5 cm 時，你要稍微軟化，但立刻提出額外考題刁難：
+        你的台詞：好，算你說得有點道理，公式我勉強接受。但我再考考你：如果那個蠢工匠當初偷懶，用的是一把最小刻度是 2 cm 的粗糙間尺，那「最大絕對誤差」會變成多少？答對這題，我才徹底信你！
+
+        【階段三：最終說服】
+        當玩家正確答出最大絕對誤差是 1 cm 時，你才恍然大悟並徹底投降。
+        被說服的台詞：什麼！？原來如此！刻度 1cm 的尺最大誤差是 0.5cm，刻度 2cm 的尺最大誤差就是 1cm。尺越粗糙誤差越大！你的數學解釋無懈可擊，我徹底服了，馬上付錢給工匠！【任務成功】 (必須包含【任務成功】四個字)
+
+        【基本規則】：
+        1. 每次回覆控制在 50~80 字以內，語氣傲慢但講理。
+        2. ⚠️ 絕對不要主動提及「上限」、「下限」或「範圍 (例如 11.5~12.5)」，除非玩家主動提起。重點只放在最大絕對誤差的數值。
+        3. 如果玩家答錯加碼考題，你要大肆嘲笑：你這數學顧問是體育老師教的嗎？算錯了！公式是 1/2 乘以最小刻度，再想清楚！
+        `;
+
+        function App() {
+          const [messages, setMessages] = useState([
+            { role: 'model', content: '你們這些數學顧問給我聽好！我花一百萬訂製這尊高 12 cm 的純金招財貓，要求絕對精準！工匠用 1 cm 刻度的尺量出 12 cm，竟然跟我說做不到零誤差？我一毛錢都不會付給他！給我個合理的數學解釋！' }
+          ]);
+          const [inputText, setInputText] = useState('');
+          const [studentName, setStudentName] = useState(''); 
+          const [isRecording, setIsRecording] = useState(false);
+          const [isLoading, setIsLoading] = useState(false);
+          const [isSaving, setIsSaving] = useState(false); 
+          const [isSuccess, setIsSuccess] = useState(false);
+          const [showHint, setShowHint] = useState(false);
+          const [showIntro, setShowIntro] = useState(true); 
+          const [hasSpeechSupport, setHasSpeechSupport] = useState(true);
+          
+          const messagesEndRef = useRef(null);
+          const recognitionRef = useRef(null);
+
+          useEffect(() => {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (SpeechRecognition) {
+              setHasSpeechSupport(true);
+              const recognition = new SpeechRecognition();
+              recognition.continuous = false;
+              recognition.interimResults = true;
+              recognition.lang = 'zh-HK'; 
+
+              recognition.onstart = () => setIsRecording(true);
+              
+              recognition.onresult = (event) => {
+                let interimTranscript = '';
+                let finalTranscript = '';
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                  if (event.results[i].isFinal) finalTranscript += event.results[i][0].transcript;
+                  else interimTranscript += event.results[i][0].transcript;
+                }
+                if (finalTranscript) setInputText(prev => prev + finalTranscript);
+              };
+
+              recognition.onerror = (event) => {
+                console.error('語音辨識錯誤', event.error);
+                setIsRecording(false);
+                if(event.error === 'not-allowed') setHasSpeechSupport(false);
+              };
+              recognition.onend = () => setIsRecording(false);
+              recognitionRef.current = recognition;
+            } else {
+              setHasSpeechSupport(false);
+            }
+          }, []);
+
+          useEffect(() => {
+            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+          }, [messages, isLoading]);
+
+          const toggleRecording = () => {
+            if (!hasSpeechSupport || !recognitionRef.current) {
+              alert('你的設備目前不支援語音輸入，或權限被阻擋。請使用鍵盤打字。');
+              return;
+            }
+            if (isRecording) recognitionRef.current.stop();
+            else {
+              setInputText(''); 
+              recognitionRef.current.start();
+            }
+          };
+
+          const handleSaveToSheet = async () => {
+            if (!studentName.trim()) {
+              alert("請先輸入姓名！");
+              setShowIntro(true);
+              return;
+            }
+            if (messages.length <= 1) {
+              alert("你還沒有進行對話！");
+              return;
+            }
+            
+            setIsSaving(true);
+            try {
+              const payload = {
+                name: studentName,
+                success: isSuccess,
+                history: messages
+              };
+
+              await fetch(GOOGLE_SHEET_URL, {
+                method: 'POST',
+                body: JSON.stringify(payload),
+                headers: {
+                  'Content-Type': 'text/plain;charset=utf-8', 
+                }
+              });
+              alert("對話紀錄已成功提交給老師！");
+            } catch (error) {
+              console.error("Save Error:", error);
+              alert("儲存紀錄時發生錯誤，請截圖保留你的對話以便老師檢查。");
+            } finally {
+              setIsSaving(false);
+            }
+          };
+
+          const handleSend = async () => {
+            if (!inputText.trim() || isLoading) return;
+
+            const newUserMsg = { role: 'user', content: inputText };
+            const newHistory = [...messages, newUserMsg];
+            setMessages(newHistory);
+            setInputText('');
+            setIsLoading(true);
+
+            try {
+              // ⚠️ 確保使用最穩定正式版模型 gemini-1.5-flash
+              const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+              const contents = newHistory.map(msg => ({
+                role: msg.role === 'model' ? 'model' : 'user',
+                parts: [{ text: msg.content }]
+              }));
+
+              const payload = {
+                contents: contents,
+                systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] }
+              };
+
+              const result = await fetchWithRetry(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+              });
+
+              const aiResponseText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+              
+              if (!aiResponseText) {
+                throw new Error("API 未回傳文字內容");
+              }
+
+              const updatedHistory = [...newHistory, { role: 'model', content: aiResponseText }];
+              setMessages(updatedHistory);
+
+              if (aiResponseText.includes('【任務成功】')) {
+                setIsSuccess(true);
+              }
+            } catch (error) {
+              console.error("API 請求錯誤：", error);
+              setMessages([...newHistory, { role: 'model', content: `【系統提示】連線發生錯誤：${error.message}。請確認網路狀態再試一次。` }]);
+            } finally {
+              setIsLoading(false);
+            }
+          };
+
+          const handleKeyDown = (e) => {
+            if (e.key === 'Enter') handleSend();
+          };
+
+          return (
+            <div className="flex flex-col h-[100dvh] w-full max-w-2xl mx-auto bg-slate-50 shadow-2xl font-sans relative md:border-x md:border-slate-200">
+              
+              {showIntro && (
+                <div className="absolute inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+                  <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md animate-in fade-in duration-200">
+                    <h2 className="text-2xl font-bold text-amber-600 mb-4 flex items-center">
+                      <AlertCircle className="w-6 h-6 mr-2" />
+                      任務背景
+                    </h2>
+                    <div className="space-y-3 text-slate-700 text-sm md:text-base leading-relaxed mb-4">
+                      <p>
+                        <strong>首富金先生</strong>要求純金招財貓高度<span className="text-red-500 font-bold">絕對剛好 12 cm，毫無誤差</span>。工匠用最小刻度 1 cm 的尺量出 12 cm，金先生因為不懂誤差原理而拒付尾款！
+                      </p>
+                      <p className="bg-slate-100 p-2 rounded text-slate-600 border border-slate-200 text-sm">
+                        🎯 <strong>你的任務：</strong>運用今天學到的<strong className="text-blue-600">「最大絕對誤差」</strong>公式，向金先生解釋為什麼 1cm 刻度的尺會有 0.5cm 的誤差，並回答他的加碼難題。
+                      </p>
+                    </div>
+                    
+                    <div className="bg-amber-50 p-4 rounded-xl border border-amber-200 mb-4">
+                      <label className="block font-bold text-amber-900 mb-2">👤 請先輸入你的姓名：</label>
+                      <input 
+                        type="text" 
+                        value={studentName}
+                        onChange={(e) => setStudentName(e.target.value)}
+                        placeholder="例如：陳大文 (2B)"
+                        className="w-full px-3 py-3 md:py-2 border border-amber-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 text-base"
+                      />
+                    </div>
+
+                    <button 
+                      onClick={() => setShowIntro(false)}
+                      disabled={!studentName.trim()}
+                      className="w-full bg-amber-500 hover:bg-amber-600 disabled:bg-amber-300 text-white font-bold py-3 px-4 rounded-xl shadow-md transition-colors text-lg"
+                    >
+                      接受挑戰
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <header className="bg-amber-500 text-white p-4 shadow-md flex justify-between items-center z-10 relative shrink-0">
+                <div>
+                  <h1 className="text-xl md:text-2xl font-bold">誤差偵探：黃金貓之謎</h1>
+                  <p className="text-xs md:text-sm text-amber-100">{studentName ? `顧問：${studentName}` : '難度：⭐⭐'}</p>
+                </div>
+                <div className="flex items-center space-x-2 md:space-x-4">
+                  <button 
+                    onClick={handleSaveToSheet}
+                    disabled={isSaving}
+                    className="flex items-center text-sm md:text-base font-bold bg-amber-600 hover:bg-amber-700 px-3 py-2 rounded-lg transition-colors"
+                    title="儲存紀錄給老師"
+                  >
+                    <Save className="w-4 h-4 md:w-5 md:h-5 mr-1" />
+                    <span className="hidden sm:inline">{isSaving ? '傳送中...' : '交功課'}</span>
+                    <span className="sm:hidden">{isSaving ? '傳送...' : '提交'}</span>
+                  </button>
+                  <button 
+                    onClick={() => setShowIntro(true)} 
+                    className="p-2 hover:bg-amber-600 rounded-full transition-colors" 
+                    title="查看任務背景"
+                  >
+                    <InfoIcon className="w-5 h-5 md:w-6 md:h-6 text-amber-100 hover:text-white" />
+                  </button>
+                </div>
+              </header>
+
+              <main className="flex-1 overflow-y-auto p-4 space-y-4">
+                {messages.map((msg, index) => (
+                  <div key={index} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[85%] md:max-w-[75%] p-3 md:p-4 rounded-2xl ${
+                      msg.role === 'user' 
+                        ? 'bg-blue-600 text-white rounded-br-none shadow-sm' 
+                        : 'bg-white text-slate-800 border border-slate-200 shadow-sm rounded-bl-none'
+                    }`}>
+                      <p className="whitespace-pre-wrap leading-relaxed text-base md:text-lg">{msg.content.replace('【任務成功】', '')}</p>
+                    </div>
+                  </div>
+                ))}
+                
+                {isLoading && (
+                  <div className="flex justify-start">
+                    <div className="max-w-[80%] p-3 md:p-4 rounded-2xl bg-white text-slate-500 border border-slate-200 rounded-bl-none flex items-center space-x-2">
+                      <div className="w-2 h-2 md:w-3 md:h-3 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                      <div className="w-2 h-2 md:w-3 md:h-3 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                      <div className="w-2 h-2 md:w-3 md:h-3 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                    </div>
+                  </div>
+                )}
+                <div ref={messagesEndRef} />
+              </main>
+
+              {isSuccess && (
+                <div className="p-4 m-4 bg-green-100 border border-green-300 rounded-xl text-green-800 text-center shadow-sm animate-pulse font-bold flex flex-col items-center shrink-0">
+                  <span className="text-3xl mb-2">🎉</span>
+                  <span className="text-lg">太厲害了！你成功運用公式說服了金先生！</span>
+                  <button 
+                    onClick={handleSaveToSheet}
+                    disabled={isSaving}
+                    className="mt-3 bg-green-600 hover:bg-green-700 text-white px-5 py-3 rounded-full text-base flex items-center shadow-md transition-transform active:scale-95"
+                  >
+                    <Save className="w-5 h-5 mr-2" />
+                    {isSaving ? '儲存中...' : '點擊這裡將紀錄提交給老師'}
+                  </button>
+                </div>
+              )}
+
+              {showHint && !isSuccess && (
+                <div className="mx-4 mb-2 p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-sm md:text-base text-yellow-800 shadow-sm animate-in slide-in-from-bottom-2 shrink-0">
+                  <div className="flex items-center font-bold text-yellow-900 border-b border-yellow-200 pb-2 mb-2 text-base md:text-lg">
+                    <InfoIcon className="w-5 h-5 md:w-6 md:h-6 mr-1" /> 顧問提示
+                  </div>
+                  <ul className="space-y-2">
+                    <li className="flex items-start"><ChevronRight className="w-5 h-5 mt-0.5 text-yellow-600 mr-1 flex-shrink-0"/>試著把今天背誦的公式告訴他：「<strong>最大絕對誤差 = 1/2 × 最小刻度</strong>」。</li>
+                    <li className="flex items-start"><ChevronRight className="w-5 h-5 mt-0.5 text-yellow-600 mr-1 flex-shrink-0"/>幫他算出 1cm 刻度的尺，最大誤差是 0.5cm。</li>
+                    <li className="flex items-start"><ChevronRight className="w-5 h-5 mt-0.5 text-yellow-600 mr-1 flex-shrink-0"/>當他拋出 2cm 尺的難題時，冷靜用同一個公式計算答案給他！</li>
+                  </ul>
+                </div>
+              )}
+
+              <footer className="bg-white border-t border-slate-200 p-3 md:p-4 pb-safe shrink-0">
+                {!isSuccess && (
+                  <div className="flex justify-center mb-2">
+                    <button 
+                      onClick={() => setShowHint(!showHint)}
+                      className="text-sm md:text-base text-blue-600 hover:text-blue-800 font-medium px-4 py-1.5 rounded-full bg-blue-50 hover:bg-blue-100 transition-colors"
+                    >
+                      {showHint ? '隱藏提示' : '需要一點提示嗎？💡'}
+                    </button>
+                  </div>
+                )}
+                
+                <div className="flex items-center space-x-2 md:space-x-3">
+                  <button
+                    onClick={toggleRecording}
+                    disabled={isSuccess || !hasSpeechSupport}
+                    className={`p-3 md:p-4 rounded-full flex-shrink-0 transition-all ${
+                      !hasSpeechSupport
+                        ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                        : isRecording 
+                          ? 'bg-red-500 text-white animate-pulse shadow-lg scale-110' 
+                          : 'bg-amber-100 text-amber-700 hover:bg-amber-200 disabled:opacity-50'
+                    }`}
+                    title={!hasSpeechSupport ? '此設備不支援語音輸入' : '語音輸入'}
+                  >
+                    {isRecording ? <Mic className="w-6 h-6 md:w-7 md:h-7" /> : <MicOff className="w-6 h-6 md:w-7 md:h-7" />}
+                  </button>
+
+                  <input
+                    type="text"
+                    value={inputText}
+                    onChange={(e) => setInputText(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    disabled={isSuccess || isRecording}
+                    placeholder={isRecording ? '正在聆聽...' : (!hasSpeechSupport ? '點擊此處打字...' : '點擊說話或打字...')}
+                    className="flex-1 border border-slate-300 rounded-full px-4 md:px-6 py-3 md:py-4 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 disabled:bg-slate-50 transition-colors text-base md:text-lg"
+                  />
+
+                  <button
+                    onClick={handleSend}
+                    disabled={!inputText.trim() || isLoading || isSuccess}
+                    className="p-3 md:p-4 bg-amber-500 text-white rounded-full flex-shrink-0 hover:bg-amber-600 disabled:opacity-50 disabled:bg-slate-300 transition-colors"
+                  >
+                    <Send className="w-6 h-6 md:w-7 md:h-7 ml-1" />
+                  </button>
+                </div>
+              </footer>
+            </div>
+          );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
